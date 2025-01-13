@@ -51,6 +51,15 @@ jobs:
           git clone --single-branch --depth=1 --no-tags ${{ github.event.inputs.KERNEL_SOURCE }} -b ${{ github.event.inputs.KERNEL_BRANCH }} ${{ github.workspace }}/kernel
           echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
+      - name: Adding KernelSU Next Patches to Kernel Source
+        run: |
+          git config --global user.name "momenabdulrazek"
+          git config --global user.email "momen.abdelrazek33@gmail.com"
+          curl https://gist.githubusercontent.com/momenabdulrazek/162e5337bdada981b238953afc2008b5/raw/372dc5d8f80c02749b43611ba39a351a62526ac0/ksu.patch >> ${{ github.workspace }}/kernel/ksu.patch
+          cd ${{ github.workspace }}/kernel
+          git am ${{ github.workspace }}/kernel/ksu.patch
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -
+
       - name: Set-up Toolchain
         run: |
          mkdir -p ${{ github.workspace }}/toolchain
