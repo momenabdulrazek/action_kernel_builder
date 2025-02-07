@@ -57,6 +57,7 @@ jobs:
           git config --global user.email "momen.abdelrazek33@gmail.com"
           curl https://gist.githubusercontent.com/momenabdulrazek/162e5337bdada981b238953afc2008b5/raw/372dc5d8f80c02749b43611ba39a351a62526ac0/ksu.patch >> ${{ github.workspace }}/kernel/ksu.patch
           cd ${{ github.workspace }}/kernel
+          git revert 2d7c445bd4340345eaf48a8fea2fe1bb5ee35194
           git am ${{ github.workspace }}/kernel/ksu.patch
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -
 
