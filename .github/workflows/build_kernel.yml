@@ -55,7 +55,7 @@ jobs:
         run: |
           git config --global user.name "momenabdulrazek"
           git config --global user.email "momen.abdelrazek33@gmail.com"
-          curl https://gist.githubusercontent.com/momenabdulrazek/162e5337bdada981b238953afc2008b5/raw/372dc5d8f80c02749b43611ba39a351a62526ac0/ksu.patch >> ${{ github.workspace }}/kernel/ksu.patch
+          curl https://gist.githubusercontent.com/momenabdulrazek/162e5337bdada981b238953afc2008b5/raw/08d39eab3e2f20426ce233ea7a2eb5fa40c01d2c/ksu.patch >> ${{ github.workspace }}/kernel/ksu.patch
           cd ${{ github.workspace }}/kernel
           git am ${{ github.workspace }}/kernel/ksu.patch
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -
