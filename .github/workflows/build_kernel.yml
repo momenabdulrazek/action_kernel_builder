@@ -112,7 +112,7 @@ jobs:
          diff=$((end - start))
          echo -e "BUILD COMPLETED IN ${diff} SECONDS"
 
-        continue-on-error: false
+        continue-on-error: true
          
       - name: Checking for outputs
         run: |
