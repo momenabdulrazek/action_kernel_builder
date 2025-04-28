@@ -43,8 +43,17 @@ jobs:
           rm -rf ${{ github.workspace }}/*
           sudo apt-get update
           sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev
-          sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache python-is-python3 python2.7 python2.7-dev
-          sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar cpio jq 
+          sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache python-is-python3
+          sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar cpio jq
+          mkdir -p ${{ github.workspace }}/workspace && cd ${{ github.workspace }}/workspace
+          wget https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
+          tar -xvf Python-2.7.18.tgz
+          cd Python-2.7.18
+          ./configure --enable-optimizations
+          make
+          sudo make install
+          python2 --version
+          
           
       - name: Cloning Kernel Source
         run: |
