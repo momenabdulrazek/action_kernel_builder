@@ -45,6 +45,15 @@ jobs:
           sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev
           sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache python-is-python3
           sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar cpio jq
+          mkdir -p ${{ github.workspace }}/workspace && cd ${{ github.workspace }}/workspace
+          wget https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
+          tar -xvf Python-2.7.18.tgz
+          cd Python-2.7.18
+          ./configure --enable-optimizations
+          make
+          sudo make install
+          python2 --version
+          
           
       - name: Cloning Kernel Source
         run: |
@@ -93,15 +102,14 @@ jobs:
             make -j$(nproc --all) \
             O=${{ env.OBJDIR }} \
             ARCH=arm64 \
-            CC=clang \
+            CC="ccache clang" \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             AR=llvm-ar \
             LLVM_NM=llvm-nm \
             OBJCOPY=llvm-objcopy \
-            LD=ld.lld \
-            NM=llvm-nm \
+            LD=ld.lld NM=llvm-nm \
             LLVM=1 \
             LLVM_IAS=1
          }
@@ -113,7 +121,7 @@ jobs:
          diff=$((end - start))
          echo -e "BUILD COMPLETED IN ${diff} SECONDS"
 
-        continue-on-error: false
+        continue-on-error: true
          
       - name: Checking for outputs
         run: |
