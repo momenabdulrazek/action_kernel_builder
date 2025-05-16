@@ -75,6 +75,7 @@ jobs:
         run: |
           git config --global user.name "momenabdulrazek"
           git config --global user.email "momen.abdelrazek33@gmail.com"
+          cd ${{ github.workspace }}/kernel
           curl -kLSs "https://raw.githubusercontent.com/kutemeikito/KernelSU-Next/next/kernel/setup.sh" | bash -s next
 
       - name: Set environment variables
