@@ -43,7 +43,7 @@ jobs:
           rm -rf ${{ github.workspace }}/*
           sudo apt-get update
           sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev \
-              curl git ftp lftp wget libarchive-tools ccache python-is-python3 zip unzip tar gzip bzip2 rar unrar cpio jq
+            curl git ftp lftp wget libarchive-tools ccache python-is-python3 zip unzip tar gzip bzip2 rar unrar cpio jq
 
       - name: Cloning Kernel Source
         run: |
@@ -67,7 +67,7 @@ jobs:
           echo "ANYKERNEL=${{ github.workspace }}/anykernel" >> $GITHUB_ENV
           echo "CLANG_DIR=${{ github.workspace }}/toolchain" >> $GITHUB_ENV
           echo "KERNEL_NAME=${{ github.event.inputs.KERNEL_NAME }}" >> $GITHUB_ENV
-          echo "ZIP_NAME=${{ github.event.inputs.KERNEL_NAME }}-$(date +"%d%m%Y").zip" >> $GITHUB_ENV
+          echo "ZIP_NAME=${{ github.event.inputs.KERNEL_NAME }}-$(date +'%d%m%Y').zip" >> $GITHUB_ENV
           echo "OUTPUT_DIR=${{ github.workspace }}/compiled" >> $GITHUB_ENV
 
           KERNEL_SOURCE_URL="${{ github.event.inputs.KERNEL_SOURCE }}"
@@ -75,16 +75,19 @@ jobs:
             KERNEL_SOURCE_URL="${KERNEL_SOURCE_URL%.git}"
           fi
           echo "KERNEL_SOURCE_URL=${KERNEL_SOURCE_URL}" >> $GITHUB_ENV
-         
+
       - name: Start Compilation
         run: |
-          mkdir -p ${{ env.OUTPUT_DIR }}
+          mkdir -p "${{ env.OUTPUT_DIR }}"
           cd ${{ github.workspace }}/kernel
 
           export PATH="${{ env.CLANG_DIR }}/bin:$PATH"
           start=$(date +"%s")
 
+          # make defconfig(s)
           make -s ARCH=arm64 O=${{ env.OBJDIR }} ${{ github.event.inputs.CONFIG_FILE }} -j$(nproc --all)
+
+          # build
           make -j$(nproc --all) \
             O=${{ env.OBJDIR }} \
             ARCH=arm64 \
@@ -100,35 +103,111 @@ jobs:
             LLVM_IAS=1
 
           end=$(date +"%s")
-          echo "BUILD COMPLETED IN $((end - start)) SECONDS"
+          echo "BUILD_COMPLETED_SECONDS=$((end - start))" >> $GITHUB_ENV
+          echo "BUILD_COMPLETED_IN=${{ env.BUILD_COMPLETED_SECONDS }} seconds"
 
-      - name: Collect compiled outputs
+      - name: Collect compiled outputs and prepare AnyKernel
         run: |
-          cd "${{ env.OBJDIR }}"
-          qcom_dtb="arch/arm64/boot/dts/vendor/qcom"
+          set -euo pipefail
+          OBJ="${{ env.OBJDIR }}"
+          OUT="${{ env.OUTPUT_DIR }}"
+          ANYKERNEL_DIR="${{ env.ANYKERNEL }}"
 
-          mkdir -p "${{ env.OUTPUT_DIR }}"
-          git clone -q ${{ github.event.inputs.ANYKERNEL }} "${{ env.ANYKERNEL }}"
+          mkdir -p "${OUT}"
+          # clone anykernel
+          git clone -q ${{ github.event.inputs.ANYKERNEL }} "${ANYKERNEL_DIR}"
 
-          # Copy main kernel images
-          cp -f arch/arm64/boot/Image* "${{ env.OUTPUT_DIR }}" 2>/dev/null || true
-          cp -f arch/arm64/boot/dtbo.img "${{ env.OUTPUT_DIR }}/dtbo.img" 2>/dev/null || true
+          # make dtb search list
+          wanted_dtbs=(sm8150.dtb sm8150p.dtb sm8150p-v2.dtb sm8150-v2.dtb)
 
-          # Copy specific DTBs if present
-          for dtb in sm8150.dtb sm8150p.dtb sm8150p-v2.dtb sm8150-v2.dtb; do
-            if [[ -f "${qcom_dtb}/${dtb}" ]]; then
-              cp -f "${qcom_dtb}/${dtb}" "${{ env.OUTPUT_DIR }}/"
+          # Copy kernel images (try multiple possibilities)
+          # prefer Image, then Image.gz, then Image.gz-dtb
+          if [[ -f "${OBJ}/arch/arm64/boot/Image" ]]; then
+            cp -f "${OBJ}/arch/arm64/boot/Image" "${OUT}/Image" || true
+            cp -f "${OBJ}/arch/arm64/boot/Image" "${ANYKERNEL_DIR}/Image" || true
+          fi
+
+          if [[ -f "${OBJ}/arch/arm64/boot/Image.gz" ]]; then
+            cp -f "${OBJ}/arch/arm64/boot/Image.gz" "${OUT}/Image.gz" || true
+            cp -f "${OBJ}/arch/arm64/boot/Image.gz" "${ANYKERNEL_DIR}/Image.gz" || true
+          fi
+
+          if [[ -f "${OBJ}/arch/arm64/boot/Image.gz-dtb" ]]; then
+            cp -f "${OBJ}/arch/arm64/boot/Image.gz-dtb" "${OUT}/Image.gz-dtb" || true
+            cp -f "${OBJ}/arch/arm64/boot/Image.gz-dtb" "${ANYKERNEL_DIR}/Image.gz-dtb" || true
+          fi
+
+          # dtbo
+          if [[ -f "${OBJ}/arch/arm64/boot/dtbo.img" ]]; then
+            cp -f "${OBJ}/arch/arm64/boot/dtbo.img" "${OUT}/dtbo.img" || true
+            cp -f "${OBJ}/arch/arm64/boot/dtbo.img" "${ANYKERNEL_DIR}/dtbo.img" || true
+          fi
+
+          # helper: find and copy DTBs (search multiple likely locations)
+          copy_dtb_if_found() {
+            local dtbname="$1"
+            # search common dirs under kernel tree and object dir
+            # prioritize compiled dtbs close to OBJ/arch/arm64/boot/dts
+            candidates=(
+              "${OBJ}/arch/arm64/boot/dts/vendor/qcom/${dtbname}"
+              "${OBJ}/arch/arm64/boot/dts/qcom/${dtbname}"
+              "${OBJ}/arch/arm64/boot/dts/${dtbname}"
+              "${OBJ}/arch/arm64/boot/dtb/${dtbname}"
+              "${{ github.workspace }}/kernel/arch/arm64/boot/dts/vendor/qcom/${dtbname}"
+              "${{ github.workspace }}/kernel/arch/arm64/boot/dts/qcom/${dtbname}"
+              "${{ github.workspace }}/kernel/arch/arm64/boot/dts/${dtbname}"
+            )
+            for p in "${candidates[@]}"; do
+              if [[ -f "$p" ]]; then
+                mkdir -p "${OUT}"
+                mkdir -p "${ANYKERNEL_DIR}/dtbs"
+                cp -f "$p" "${OUT}/${dtbname}" || true
+                cp -f "$p" "${ANYKERNEL_DIR}/dtbs/${dtbname}" || true
+                echo "Found and copied ${dtbname} from $p"
+                return 0
+              fi
+            done
+
+            # fallback: find anywhere under kernel tree / object dir
+            found="$(find "${OBJ}" "${{ github.workspace }}/kernel" -type f -name "${dtbname}" 2>/dev/null | head -n1 || true)"
+            if [[ -n "${found}" ]]; then
+              cp -f "${found}" "${OUT}/${dtbname}" || true
+              cp -f "${found}" "${ANYKERNEL_DIR}/dtbs/${dtbname}" || true
+              echo "Found and copied ${dtbname} from ${found}"
+              return 0
             fi
+
+            echo "WARNING: ${dtbname} not found"
+            return 1
+          }
+
+          # try all requested dtbs
+          for dtb in "${wanted_dtbs[@]}"; do
+            copy_dtb_if_found "${dtb}" || true
           done
 
-          # Package AnyKernel zip
-          cd "${{ env.ANYKERNEL }}"
-          cp -f "${{ env.OBJDIR }}/arch/arm64/boot/Image.gz-dtb" . 2>/dev/null || true
-          cp -f "${{ env.OBJDIR }}/arch/arm64/boot/dtbo.img" . 2>/dev/null || true
-          zip -r AnyKernel.zip *
-          mv AnyKernel.zip "${{ env.OUTPUT_DIR }}/${{ env.ZIP_NAME }}"
+          # Also copy any other dtb from vendor qcom dir to release (non-fatal)
+          if ls "${OBJ}/arch/arm64/boot/dts/vendor/qcom/"*.dtb 1> /dev/null 2>&1; then
+            mkdir -p "${OUT}/qcom_dtbs"
+            cp -f "${OBJ}/arch/arm64/boot/dts/vendor/qcom/"*.dtb "${OUT}/qcom_dtbs/" || true
+          fi
+
+          # Ensure AnyKernel contains at least one kernel image for flashing
+          # If AnyKernel expects "Image", provide it; if only gz-dtb exists, include it as well.
+          # (We already copied any found images above.)
+
+          # Create AnyKernel.zip
+          cd "${ANYKERNEL_DIR}"
+          # include dtbs folder content in zip by keeping them in the repo dir
+          zip -r AnyKernel.zip . -q
+          mv AnyKernel.zip "${OUT}/${{ env.ZIP_NAME }}" || true
+
+          # output listing for debugging
+          echo "Compiled output folder content:"
+          ls -al "${OUT}" || true
 
           echo "RELEASE_DATE=$(date +'%B %-d, %Y %H:%M')" >> $GITHUB_ENV
+          echo "ZIP_NAME=${{ env.ZIP_NAME }}" >> $GITHUB_ENV
 
       - name: Upload files to repository releases page
         uses: softprops/action-gh-release@v1
