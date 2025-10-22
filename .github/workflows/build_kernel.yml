@@ -34,42 +34,33 @@ jobs:
     permissions: write-all
     defaults:
       run:
-       shell: bash
-       working-directory: ${{ github.workspace }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
 
     steps:
       - name: Set-up environment
         run: |
           rm -rf ${{ github.workspace }}/*
           sudo apt-get update
-          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev
-          sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache python-is-python3
-          sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar cpio jq
-          
-          
+          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev \
+              curl git ftp lftp wget libarchive-tools ccache python-is-python3 zip unzip tar gzip bzip2 rar unrar cpio jq
+
       - name: Cloning Kernel Source
         run: |
           git clone --single-branch --depth=1 --no-tags ${{ github.event.inputs.KERNEL_SOURCE }} -b ${{ github.event.inputs.KERNEL_BRANCH }} ${{ github.workspace }}/kernel
-          echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          echo "COMMIT_ID=$(git -C ${{ github.workspace }}/kernel rev-parse HEAD)" >> $GITHUB_ENV
 
       - name: Set-up Toolchain
         run: |
-         mkdir -p ${{ github.workspace }}/toolchain
-         if [[ "${{ github.event.inputs.TOOLCHAIN_URL }}" == *.tar.gz ]]; then
-             wget -O clang-toolchain.tar.gz "${{ github.event.inputs.TOOLCHAIN_URL }}"
-             tar -xzf clang-toolchain.tar.gz -C ${{ github.workspace }}/toolchain
-             rm -f clang-toolchain.tar.gz
-         else
-             git clone --single-branch --depth=1 --no-tags ${{ github.event.inputs.TOOLCHAIN_URL }} ${{ github.workspace }}/toolchain
-         fi
+          mkdir -p ${{ github.workspace }}/toolchain
+          if [[ "${{ github.event.inputs.TOOLCHAIN_URL }}" == *.tar.gz ]]; then
+              wget -O clang-toolchain.tar.gz "${{ github.event.inputs.TOOLCHAIN_URL }}"
+              tar -xzf clang-toolchain.tar.gz -C ${{ github.workspace }}/toolchain
+              rm -f clang-toolchain.tar.gz
+          else
+              git clone --single-branch --depth=1 --no-tags ${{ github.event.inputs.TOOLCHAIN_URL }} ${{ github.workspace }}/toolchain
+          fi
 
-      - name: Adding KernelSU Next Patches to Kernel Source
-        run: |
-          git config --global user.name "momenabdulrazek"
-          git config --global user.email "momen.abdelrazek33@gmail.com"
-          cd ${{ github.workspace }}/kernel
-          curl -kLSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s susfs-main
-    
       - name: Set environment variables
         run: |
           echo "OBJDIR=${{ github.workspace }}/kernel/out" >> $GITHUB_ENV
@@ -87,18 +78,14 @@ jobs:
          
       - name: Start Compilation
         run: |
-         mkdir -p ${{ env.OUTPUT_DIR }}
-         cd ${{ github.workspace }}/kernel
-         
-         export PATH="${{ env.CLANG_DIR }}/bin:$PATH"
-         
-         make_defconfig() {
-            start=$(date +"%s")
-            make -s ARCH=arm64 O=${{ env.OBJDIR }} ${{ github.event.inputs.CONFIG_FILE }} -j$(nproc --all)
-         }
-         
-         compile() {       
-            make -j$(nproc --all) \
+          mkdir -p ${{ env.OUTPUT_DIR }}
+          cd ${{ github.workspace }}/kernel
+
+          export PATH="${{ env.CLANG_DIR }}/bin:$PATH"
+          start=$(date +"%s")
+
+          make -s ARCH=arm64 O=${{ env.OBJDIR }} ${{ github.event.inputs.CONFIG_FILE }} -j$(nproc --all)
+          make -j$(nproc --all) \
             O=${{ env.OBJDIR }} \
             ARCH=arm64 \
             CC="ccache clang" \
@@ -111,71 +98,46 @@ jobs:
             LD=ld.lld NM=llvm-nm \
             LLVM=1 \
             LLVM_IAS=1
-         }
 
-         make_defconfig
-         compile
+          end=$(date +"%s")
+          echo "BUILD COMPLETED IN $((end - start)) SECONDS"
 
-         end=$(date +"%s")
-         diff=$((end - start))
-         echo -e "BUILD COMPLETED IN ${diff} SECONDS"
-
-        continue-on-error: true
-         
-      - name: Checking for outputs
+      - name: Collect compiled outputs
         run: |
-         cd "${{ env.OBJDIR }}"
-         
-         compiled_image="arch/arm64/boot/Image"
-         compiled_gz_image="arch/arm64/boot/Image.gz"
-         compiled_gz_dtb="arch/arm64/boot/Image.gz-dtb"
-         compiled_dtbo="arch/arm64/boot/dtbo.img"
-         qcom_dtb="arch/arm64/boot/dts/vendor/qcom"
-           
-         if [[ -f ${compiled_image} || -f ${compiled_gz_image} || -f ${compiled_gz_dtb} ]]; then
-              git clone -q ${{ github.event.inputs.ANYKERNEL }} "${{ env.ANYKERNEL }}"
+          cd "${{ env.OBJDIR }}"
+          qcom_dtb="arch/arm64/boot/dts/vendor/qcom"
 
-              if [[ -f "${compiled_image}" ]]; then
-                  cp -f "${compiled_image}" "${{ env.ANYKERNEL }}/Image" || true
-                  cp -f "${compiled_image}" "${{ env.OUTPUT_DIR }}/Image" || true
-              elif [[ -f "${compiled_gz_image}" ]]; then
-                  cp -f "${compiled_gz_image}" "${{ env.ANYKERNEL }}/Image.gz" || true
-                  cp -f "${compiled_gz_image}" "${{ env.OUTPUT_DIR }}/Image.gz" || true
-              elif [[ -f "${compiled_gz_dtb}" ]]; then
-                  cp -f "${compiled_gz_dtb}" "${{ env.ANYKERNEL }}/Image.gz-dtb" || true
-                  cp -f "${compiled_gz_dtb}" "${{ env.OUTPUT_DIR }}/Image.gz-dtb" || true
-              fi
-              
-              if [[ -f "${compiled_dtbo}" ]]; then
-                  cp -f "${compiled_dtbo}" "${{ env.ANYKERNEL }}/dtbo.img" || true
-                  cp -f "${compiled_dtbo}" "${{ env.OUTPUT_DIR }}/dtbo.img" || true
-              fi
-              
-              if ls ${qcom_dtb}/*.dtb 1> /dev/null 2>&1; then
-                  cp -f ${qcom_dtb}/*.dtb "${{ env.OUTPUT_DIR }}" || true
-              fi
+          mkdir -p "${{ env.OUTPUT_DIR }}"
+          git clone -q ${{ github.event.inputs.ANYKERNEL }} "${{ env.ANYKERNEL }}"
 
-              cd "${{ env.ANYKERNEL }}"
-              zip -r AnyKernel.zip *
-              mv -- "AnyKernel.zip" "${{ env.ZIP_NAME }}"
-              mv -- "${{ env.ANYKERNEL }}/${{ env.ZIP_NAME }}" "${{ env.OUTPUT_DIR }}/${{ env.ZIP_NAME }}"
-              rm -rf "${{ env.ANYKERNEL }}"
-         else
-              echo "ERROR: Some output is missing!"
-              exit 1
-         fi
-         
-         zip_file=$(find ${{ env.OUTPUT_DIR }} -name '${{ github.event.inputs.KERNEL_NAME }}*.zip' -print -quit)
-         echo "ZIP_NAME=$(basename "$zip_file" .zip)" >> $GITHUB_ENV
-         echo "RELEASE_DATE=$(date +'%B %-d, %Y %H:%M')" >> $GITHUB_ENV
+          # Copy main kernel images
+          cp -f arch/arm64/boot/Image* "${{ env.OUTPUT_DIR }}" 2>/dev/null || true
+          cp -f arch/arm64/boot/dtbo.img "${{ env.OUTPUT_DIR }}/dtbo.img" 2>/dev/null || true
+
+          # Copy specific DTBs if present
+          for dtb in sm8150.dtb sm8150p.dtb sm8150p-v2.dtb sm8150-v2.dtb; do
+            if [[ -f "${qcom_dtb}/${dtb}" ]]; then
+              cp -f "${qcom_dtb}/${dtb}" "${{ env.OUTPUT_DIR }}/"
+            fi
+          done
+
+          # Package AnyKernel zip
+          cd "${{ env.ANYKERNEL }}"
+          cp -f "${{ env.OBJDIR }}/arch/arm64/boot/Image.gz-dtb" . 2>/dev/null || true
+          cp -f "${{ env.OBJDIR }}/arch/arm64/boot/dtbo.img" . 2>/dev/null || true
+          zip -r AnyKernel.zip *
+          mv AnyKernel.zip "${{ env.OUTPUT_DIR }}/${{ env.ZIP_NAME }}"
+
+          echo "RELEASE_DATE=$(date +'%B %-d, %Y %H:%M')" >> $GITHUB_ENV
 
       - name: Upload files to repository releases page
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ${{ github.workspace }}/compiled/*
+            ${{ env.OUTPUT_DIR }}/*
           name: ${{ github.event.inputs.KERNEL_NAME }} // ${{ env.RELEASE_DATE }}
           tag_name: ${{ github.run_id }}
           body: |
             [Kernel Source](${{ env.KERNEL_SOURCE_URL }}/tree/${{ github.event.inputs.KERNEL_BRANCH }})
-            [Latest Commit](${{ env.KERNEL_SOURCE_URL }}/commit/${{ env.COMMIT_ID }}) at the time of building.
+            [Latest Commit](${{ env.KERNEL_SOURCE_URL }}/commit/${{ env.COMMIT_ID }})
+            Build finished on ${{ env.RELEASE_DATE }}
